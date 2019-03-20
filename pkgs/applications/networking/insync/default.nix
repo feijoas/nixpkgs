@@ -1,33 +1,84 @@
-{ stdenv, fetchurl, makeWrapper }:
+{ stdenv
+, lib
+, fetchurl
+, makeWrapper 
+, dpkg
+, glibc
+, glib
+, libglvnd
+, libXcomposite
+, libXcursor
+, libXi
+, libXrandr
+, libXtst 
+, libxcb
+, nss
+, qt5
+, xdg_utils
+, zlib
+}:
 
-stdenv.mkDerivation rec {
-  name = "insync-${version}";
+let rpath = lib.makeLibraryPath [
+    glibc
+    glib
+    libXcomposite
+    libXi
+    libXrandr
+    libXtst
+    libglvnd
+    #nss
+    xdg_utils
+    zlib
+    qt5.qtbase 
+    qt5.qtlocation
+    qt5.qtdeclarative  
+    qt5.qtwebengine 
+    qt5.qtserialport
+    qt5.qtwebchannel
+];
+
+in stdenv.mkDerivation rec {
+  name = "insync";
   version = "1.5.5.37367";
   src =
     if stdenv.hostPlatform.system == "x86_64-linux" then
       fetchurl {
-        url = "http://s.insynchq.com/builds/insync-portable_${version}_amd64.tar.bz2";
-        sha256 = "1yz8l8xjr0pm30hvv4w59wzs569xzkpn8lv12pyl82r1l16h5zp3";
+        url = "http://s.insynchq.com/builds/${name}_${version}-artful_amd64.deb";
+        sha256 = "1pd2ad3ky0xapcm1ijq1vhv36am62bfb9mrrvbny9x7sanf7ji3w";
       }
     else
       throw "${name} is not supported on ${stdenv.hostPlatform.system}";
 
-  buildInputs = [ makeWrapper ];
 
-  postPatch = ''
-    patchelf --interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" client/insync-portable
-  '';
+  buildInputs = [ dpkg makeWrapper ];
+
+  unpackPhase = "dpkg-deb --fsys-tarfile $src | tar -x --no-same-permissions --no-same-owner";
 
   installPhase = ''
-    mkdir -p $out/bin
-    cp -a client $out/client
-    makeWrapper $out/client/insync-portable $out/bin/insync --set LC_TIME C
+    mkdir -p $out/usr
+    cp -R usr/ $out/
+    ln -s $out/usr/share $out/share
+    chmod a-x $out/usr/lib/insync/library.zip # do not match in the next loop
+
+    for file in $(find $out -type f \( -perm /0111 -o -name \*.so\* \) ); do
+      patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" "$file" || true
+      patchelf --set-rpath ${rpath}:$out/usr/lib/insync/ $file || true
+    done
+
+    makeWrapper $out/usr/lib/insync/insync $out/bin/insync --set LC_TIME C
   '';
 
-  meta = {
+  postPatch = ''
+    substituteInPlace usr/bin/insync --replace /usr/lib/insync $out/usr/lib/insync
+  '';
+
+  dontConfigure = true;
+  dontBuild = true;
+
+  meta = with stdenv.lib; {
     platforms = ["x86_64-linux"];
     license = stdenv.lib.licenses.unfree;
-    maintainers = [ stdenv.lib.maintainers.benley ];
+    maintainers = with maintainers; [ mschneider ];
     homepage = https://www.insynchq.com;
     description = "Google Drive sync and backup with multiple account support";
     longDescription = ''
