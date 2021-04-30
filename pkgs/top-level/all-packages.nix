@@ -19245,6 +19245,8 @@ in
     boost = boost17x;
   };
 
+  rpiplay = callPackage ../servers/rpiplay { };
+
   roon-server = callPackage ../servers/roon-server { };
 
   s6 = skawarePackages.s6;
